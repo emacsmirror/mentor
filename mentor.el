@@ -251,8 +251,10 @@ functions"
   (beginning-of-buffer)
   (mentor-update-torrent-list)
   (while (mentor-next)
-    (when (not (mentor-torrent-is-done-p))
-      (mentor-update-torrent))))
+    ;; why not update when the torrent is done? The information is
+    ;; already in the hash-table.
+    ;;(when (not (mentor-torrent-is-done-p))
+    (mentor-update-torrent)))
 
 (defun mentor-reload ()
   "Completely reload the mentor torrent view buffer."
@@ -546,14 +548,35 @@ the torrent at point."
   (mentor-use-torrent ;; FIXME: remove this call
    (mentor-redisplay-torrent torrent)))
 
+;; (defun mentor-update-torrent (torrent)
+;;   (let* ((hash (mentor-get-property 'hash torrent))
+;;          (id (mentor-get-property 'local_id torrent)))
+;;     (dolist (method mentor-important-methods)
+;;       (let ((property (mentor-rpc-method-to-property method))
+;;             (new-value (mentor-rpc-command method hash)))
+;;         (setq torrent (assq-delete-all property torrent))
+;;         (setq torrent (cons (cons property new-value) torrent))))
+;;     (puthash id torrent mentor-torrents)))
+
+;; Alternative to above method. Currently it seems to use more
+;; bandwidth even though it only sends one request instead of 6. Need
+;; to verify this.
 (defun mentor-update-torrent (torrent)
-  (let* ((hash (mentor-get-property 'hash torrent))
-         (id (mentor-get-property 'local_id torrent)))
-    (dolist (method mentor-important-methods)
-      (let ((property (mentor-rpc-method-to-property method))
-            (new-value (mentor-rpc-command method hash)))
-        (setq torrent (assq-delete-all property torrent))
-        (setq torrent (cons (cons property new-value) torrent))))
+  (let* ((hash (list (mentor-get-property 'hash torrent)))
+         (id (mentor-get-property 'local_id torrent))
+         (request (mapcar 
+		   (lambda (method)
+		     (list (cons "methodName" method)
+			   (cons "params" hash)))
+		   mentor-important-methods))
+	 (properties (mapcar 'mentor-rpc-method-to-property
+			     mentor-important-methods))
+	 (values (mapcar 'car (mentor-rpc-command 
+			       "system.multicall" request)))
+         (new-values (zip properties values)))
+    (dolist (new-value new-values)
+      (setq torrent (assq-delete-all (car new-value) torrent))
+      (setq torrent (cons new-value torrent)))
     (puthash id torrent mentor-torrents)))
 
 (defun mentor-update-torrent-list ()
@@ -695,6 +718,13 @@ If `torrent' is nil, use torrent at point."
     (if (equal (elt str (- (length str) 1)) ?\n)
 	(substring str 0 (- (length str) 1))
       str)))
+
+;; is there already a zip method? x)
+(defun zip (list1 list2)
+  (when (and list1 list2)
+    (cons (cons (car list1) (car list2))
+	  (zip (cdr list1) (cdr list2)))))
+
 
 (provide 'mentor)
 
